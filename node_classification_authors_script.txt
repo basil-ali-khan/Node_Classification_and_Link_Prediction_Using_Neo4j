@@ -1,0 +1,99 @@
+// Step 1: Create a graph projection for the 'authorGraph' using nodes and relationships
+CALL gds.graph.project(
+  'authorGraph',
+  {
+    AuthorWithDomain: {
+      properties: ['domain_id']
+    }
+  },
+  {
+    CO_AUTHOR: {
+      type: 'CO_AUTHOR',
+      orientation: 'UNDIRECTED'
+    }
+  }
+);
+
+// Step 2: Create a new node classification pipeline
+CALL gds.beta.pipeline.nodeClassification.create('authorClassifier');
+
+// Step 3: Add the FastRP algorithm to generate node embeddings
+CALL gds.beta.pipeline.nodeClassification.addNodeProperty('authorClassifier', 'fastRP', {
+  mutateProperty: 'embedding',
+  embeddingDimension: 64,
+  randomSeed: 42
+});
+
+// Step 4: Add the Louvain algorithm to detect communities
+CALL gds.beta.pipeline.nodeClassification.addNodeProperty('authorClassifier', 'louvain', {
+  mutateProperty: 'communityId'
+});
+
+// Step 5: Select features for the classification model
+CALL gds.beta.pipeline.nodeClassification.selectFeatures('authorClassifier', ['embedding', 'communityId', 'domain_id']);
+
+// Step 6: Configure the data split for training, validation, and testing
+CALL gds.beta.pipeline.nodeClassification.configureSplit('authorClassifier', {
+  validationFolds: 5,
+  testFraction: 0.3
+});
+
+// Step 7: Add a Random Forest classifier to the pipeline
+CALL gds.beta.pipeline.nodeClassification.addRandomForest('authorClassifier', {
+  numberOfDecisionTrees: 25
+});
+
+// Step 8: Train the node classification model using the pipeline
+CALL gds.beta.pipeline.nodeClassification.train('authorGraph', {
+  pipeline: 'authorClassifier',
+  targetNodeLabels: ['AuthorWithDomain'],
+  modelName: 'TrainedModel',
+  targetProperty: 'domain_id',
+  randomSeed: 42,
+  metrics: ['F1_WEIGHTED', 'ACCURACY', 'OUT_OF_BAG_ERROR']
+})
+YIELD modelInfo, modelSelectionStats
+RETURN
+  modelInfo.bestParameters AS bestParams,
+  modelInfo.metrics.ACCURACY.test AS testAccuracy,
+  modelInfo.metrics.F1_WEIGHTED.test AS testF1,
+  modelInfo.metrics.OUT_OF_BAG_ERROR.test AS testOutOfBagError;
+
+// Step 9: Predict the class labels for nodes in the graph and calculate accuracy
+CALL gds.beta.pipeline.nodeClassification.predict.stream('authorGraph', {
+  modelName: 'TrainedModel',
+  targetNodeLabels: ['AuthorWithDomain'],
+  targetProperty: 'domain_id'
+})
+YIELD nodeId, predictedClass
+WITH nodeId, predictedClass
+MATCH (a:AuthorWithDomain)
+WHERE id(a) = nodeId
+WITH a.domain_id AS actual, predictedClass AS predicted
+RETURN count(*) AS total,
+       count(CASE WHEN actual = predicted THEN 1 END) AS correct,
+       toFloat(count(CASE WHEN actual = predicted THEN 1 END)) / count(*) AS accuracy;
+
+// Step 10: Predict the class labels and calculate precision, recall, and F1 score
+CALL gds.beta.pipeline.nodeClassification.predict.stream('authorGraph', {
+  modelName: 'TrainedModel',
+  targetNodeLabels: ['AuthorWithDomain'],
+  targetProperty: 'domain_id'
+})
+YIELD nodeId, predictedClass
+WITH nodeId, predictedClass
+MATCH (a:AuthorWithDomain)
+WHERE id(a) = nodeId
+WITH a.domain_id AS actual, predictedClass AS predicted
+// Count True Positives, False Positives, etc.
+WITH actual, predicted,
+     CASE WHEN actual = predicted THEN 1 ELSE 0 END AS TP,  // True Positives
+     CASE WHEN actual <> predicted THEN 1 ELSE 0 END AS FP,  // False Positives
+     CASE WHEN actual = predicted AND actual IS NULL THEN 1 ELSE 0 END AS TN,  // True Negatives
+     CASE WHEN actual <> predicted AND actual IS NULL THEN 1 ELSE 0 END AS FN  // False Negatives
+WITH sum(TP) AS TP_count, sum(FP) AS FP_count, sum(TN) AS TN_count, sum(FN) AS FN_count
+// Calculate Precision, Recall, F1
+WITH TP_count, FP_count, TN_count, FN_count,
+     toFloat(TP_count) / (TP_count + FP_count) AS precision,
+     toFloat(TP_count) / (TP_count + FN_count) AS recall
+RETURN precision, recall, 2 * (precision * recall) / (precision + recall) AS f1_score;

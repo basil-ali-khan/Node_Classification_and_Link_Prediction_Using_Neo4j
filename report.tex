@@ -1,0 +1,65 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{multirow}
+\usepackage{hyperref}
+
+\title{Graph Data Science for Author Domain Classification and Link Prediction}
+
+\author{\IEEEauthorblockN{Basil Ali Khan, Hamza Ansari, Hayyan Khan} \\
+\IEEEauthorblockA{Group 6\\ Graph Data Science, Spring 2025}}
+
+\begin{document}
+
+\maketitle
+
+
+
+\section{Data and Preprocessing}
+Data source: \cite{10.1162/qss_a_00163}\\
+The dataset comprises academic publications represented as a heterogeneous graph consisting of Author, Paper, and Citation entities. Preprocessing was conducted using R, where the raw data was cleaned, missing values were handled, and domain labels were assigned to authors. Subsequently, the data was imported into Neo4j and modeled using nodes: \texttt{Author}, \texttt{Paper}, and relationships: \texttt{WRITES}, \texttt{CITES}, and \texttt{CO\_AUTHOR}. 
+
+A co-authorship graph was generated where authors sharing a paper are connected via \texttt{CO\_AUTHOR} edges. Only authors with a known research domain (\texttt{domain\_id}) were included in the node classification task. These authors were given an additional label \texttt{AuthorWithDomain}.
+
+\section{Methodology}
+
+\subsection{Node Classification}
+A native projection of the co-authorship network was created for authors labeled \texttt{AuthorWithDomain}. Key features included:
+\begin{itemize}
+  \item \textbf{Louvain Community ID:} Detected to capture cluster-level collaboration structure.
+  \item \textbf{Graph Embedding:} FastRP embeddings generated for structural representation.
+  \item \textbf{Domain ID:} Used as the target property for training.
+\end{itemize}
+
+A machine learning pipeline was created using the Neo4j Graph Data Science (GDS) library. A Random Forest classifier was trained with 5-fold cross-validation. Evaluation metrics included F1-Weighted, Accuracy, and Out-of-Bag (OOB) error.
+
+\subsection{Link Prediction}
+% Fill this in later by teammates
+
+\section{Results}
+
+\subsection{Node Classification}
+% Insert evaluation metrics, confusion matrix, and examples
+
+\subsection{Link Prediction}
+% Insert evaluation metrics and findings here
+
+\section{Discussion}
+The classification model performed well in communities with distinct co-authorship patterns. However, misclassifications occurred where authors collaborated across multiple domains. Embeddings improved performance but were zero-vectors for disconnected nodes, requiring further filtering.
+
+Link prediction success depended on network density and prior collaboration patterns. Future work may incorporate GNN-based predictors.
+
+\section{Future Work}
+\begin{itemize}
+  \item Use Graph Neural Networks for richer feature learning.
+  \item Improve embedding quality by enriching node features.
+  \item Incorporate topic modeling on paper abstracts.
+\end{itemize}
+
+\section{Conclusion}
+The project demonstrated the applicability of Graph Data Science methods for classifying authors by research domain and predicting future collaborations. While effective, several improvements can boost performance in complex, sparse graphs.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references} % Add references.bib file for citations
+
+\end{document}
