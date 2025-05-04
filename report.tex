@@ -1,4 +1,4 @@
-\documentclass[conference]{IEEEtran}
+\documentclass[conference, 12pt]{IEEEtran}
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{multirow}
@@ -15,11 +15,84 @@
 
 
 
-\section{Data and Preprocessing}
+\section{Data Preprocessing and Graph Modelling}
 Data source: \cite{10.1162/qss_a_00163}\\
-The dataset comprises academic publications represented as a heterogeneous graph consisting of Author, Paper, and Citation entities. Preprocessing was conducted using R, where the raw data was cleaned, missing values were handled, and domain labels were assigned to authors. Subsequently, the data was imported into Neo4j and modeled using nodes: \texttt{Author}, \texttt{Paper}, and relationships: \texttt{WRITES}, \texttt{CITES}, and \texttt{CO\_AUTHOR}. 
+The dataset comprises academic publications represented as a 
+heterogeneous graph consisting of Author, Paper, and Citation entities. 
+Preprocessing was conducted using R, where the raw data was cleaned and 
+missing values were handled.
 
-A co-authorship graph was generated where authors sharing a paper are connected via \texttt{CO\_AUTHOR} edges. Only authors with a known research domain (\texttt{domain\_id}) were included in the node classification task. These authors were given an additional label \texttt{AuthorWithDomain}.
+
+The graph model was designed to represent the relationships between authors, papers, topics, journals, and publishers in the academic domain. The data was modeled as a heterogeneous graph in Neo4j, with the following node types and relationships:
+
+\subsection{Nodes}
+\begin{itemize}
+    \item \textbf{Author}: Represents researchers or authors. Key properties include:
+    \begin{itemize}
+        \item \texttt{id}: Unique identifier for the author.
+        \item \texttt{name}: Name of the author.
+        \item \texttt{total\_citations}: Total number of citations received by the author's papers.
+        \item \texttt{primary\_topic}: The most researched topic by the author.
+        \item \texttt{last\_collab\_year}: The most recent year of collaboration with other authors.
+    \end{itemize}
+    \item \textbf{Paper}: Represents academic papers. Key properties include:
+    \begin{itemize}
+        \item \texttt{id}: Unique identifier for the paper.
+        \item \texttt{title}: Title of the paper.
+        \item \texttt{year}: Year of publication.
+        \item \texttt{citationCount}: Number of citations received by the paper.
+    \end{itemize}
+    \item \textbf{Topic}: Represents research topics. Key properties include:
+    \begin{itemize}
+        \item \texttt{id}: Unique identifier for the topic.
+        \item \texttt{name}: Name of the topic.
+    \end{itemize}
+    \item \textbf{Journal}: Represents academic journals. Key properties include:
+    \begin{itemize}
+        \item \texttt{name}: Name of the journal.
+    \end{itemize}
+    \item \textbf{Publisher}: Represents publishers of journals. Key properties include:
+    \begin{itemize}
+        \item \texttt{name}: Name of the publisher.
+    \end{itemize}
+\end{itemize}
+
+\subsection{Relationships}
+\begin{itemize}
+    \item \textbf{WROTE}: Connects an \texttt{Author} to a \texttt{Paper} they authored.
+    \item \textbf{CO\_AUTHORED}: Connects two \texttt{Author} nodes who collaborated on the same paper. Includes:
+    \begin{itemize}
+        \item \texttt{collaboration\_year}: The year of collaboration.
+    \end{itemize}
+    \item \textbf{HAS\_TOPIC}: Connects a \texttt{Paper} to a \texttt{Topic} it addresses.
+    \item \textbf{RESEARCHES}: Connects an \texttt{Author} to a \texttt{Topic} they have researched. Includes:
+    \begin{itemize}
+        \item \texttt{paper\_count}: Number of papers the author has written on the topic.
+    \end{itemize}
+    \item \textbf{SHARED\_TOPIC}: Connects two \texttt{Author} nodes who have researched the same topic. Includes:
+    \begin{itemize}
+        \item \texttt{shared\_topics}: Number of shared topics between the authors.
+    \end{itemize}
+    \item \textbf{SHARED\_JOURNAL}: Connects two \texttt{Author} nodes who have published in the same journal. Includes:
+    \begin{itemize}
+        \item \texttt{shared\_journals}: Number of shared journals between the authors.
+    \end{itemize}
+    \item \textbf{PUBLISHED\_IN}: Connects a \texttt{Paper} to the \texttt{Journal} it was published in.
+    \item \textbf{PUBLISHED\_BY}: Connects a \texttt{Journal} to its \texttt{Publisher}.
+    \item \textbf{CITES}: Connects one \texttt{Paper} to another paper it cites.
+\end{itemize}
+
+\subsection{Feature Engineering}
+To enhance the graph model, additional features were computed:
+\begin{itemize}
+    \item \textbf{Total Citations}: The total number of citations received by an author's papers.
+    \item \textbf{Primary Topic}: The topic most frequently researched by an author.
+    \item \textbf{Last Collaboration Year}: The most recent year an author collaborated with others.
+\end{itemize}
+
+\subsection{Neo4j Script For Graph Creation}
+The Neo4j script to model the graph can be found in the github repository
+in the $graph\_model\_creation\_script.txt$ file
 
 \section{Methodology}
 
