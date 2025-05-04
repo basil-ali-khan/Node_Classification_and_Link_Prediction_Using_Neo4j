@@ -1,0 +1,149 @@
+// Indexes
+CREATE INDEX publisher_name IF NOT EXISTS FOR (pub:Publisher) ON (pub.name);
+CREATE INDEX journal_name IF NOT EXISTS FOR (j:Journal) ON (j.name);
+CREATE INDEX paper_id IF NOT EXISTS FOR (p:Paper) ON (p.id);
+CREATE INDEX topic_id IF NOT EXISTS FOR (t:Topic) ON (t.id);
+CREATE INDEX author_id IF NOT EXISTS FOR (a:Author) ON (a.id);
+
+// Publishers
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///journal.csv' AS row
+  WITH row
+  MERGE (pub:Publisher {name: row.`Journal Publisher`})
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// Journals
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///journal.csv' AS row
+  WITH row
+  MERGE (j:Journal {name: row.`Journal Name`})
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// PUBLISHED_BY (Journal to Publisher)
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///journal.csv' AS row
+  WITH row
+  MATCH (j:Journal {name: row.`Journal Name`})
+  MATCH (pub:Publisher {name: row.`Journal Publisher`})
+  MERGE (j)-[:PUBLISHED_BY]->(pub)
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// Papers
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///paper.csv' AS row
+  WITH row
+  MERGE (p:Paper {id: row.`Paper ID`})
+  SET p.title = row.`Paper Title`, p.year = toInteger(row.`Paper Year`)
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// PUBLISHED_IN (Paper to Journal)
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///paper_journal.csv' AS row
+  WITH row
+  MATCH (p:Paper {id: row.`Paper ID`})
+  MATCH (j:Journal {name: row.`Journal Name`})
+  MERGE (p)-[:PUBLISHED_IN]->(j)
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// Topics
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///topic.csv' AS row
+  WITH row
+  MERGE (t:Topic {id: row.`Topic ID`})
+  SET t.name = row.`Topic Name`
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// HAS_TOPIC (Paper to Topic)
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///paper_topic.csv' AS row
+  WITH row
+  MATCH (p:Paper {id: row.`Paper ID`})
+  MATCH (t:Topic {id: row.`Topic ID`})
+  MERGE (p)-[:HAS_TOPIC]->(t)
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// CITES (Paper to Paper)
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///paper_reference.csv' AS row
+  WITH row
+  MATCH (p1:Paper {id: row.`Paper ID`})
+  MATCH (p2:Paper {id: row.`Referenced Paper ID`})
+  MERGE (p1)-[:CITES]->(p2)
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// Authors
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///authors.csv' AS row
+  WITH row
+  MERGE (a:Author {id: row.`Author ID`})
+  SET a.name = row.`Author Name`
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// WROTE (Author to Paper)
+:auto
+CALL {
+  LOAD CSV WITH HEADERS FROM 'file:///author_paper.csv' AS row
+  WITH row
+  MATCH (a:Author {id: row.`Author ID`})
+  MATCH (p:Paper {id: row.`Paper ID`})
+  MERGE (a)-[:WROTE]->(p)
+} IN TRANSACTIONS OF 1000 ROWS;
+
+// Create CO_AUTHORED relationships
+MATCH (a1:Author)-[:WROTE]->(p:Paper)<-[:WROTE]-(a2:Author)
+WHERE a1.id <> a2.id
+MERGE (a1)-[r:CO_AUTHORED]->(a2)
+SET r.collaboration_year = p.year;
+New Relationships: WROTE (Author to Paper), CO_AUTHORED (Author to Author, with collaboration_year).
+
+
+MATCH (a:Author)-[:WROTE]->(p:Paper)-[:HAS_TOPIC]->(t:Topic)
+WITH a, t.name AS topic, COUNT(*) AS topic_count
+ORDER BY topic_count DESC
+WITH a, COLLECT(topic)[0] AS most_frequent_topic
+SET a.research_domain = most_frequent_topic;
+
+// 1. Create RESEARCHES Relationship (Author -[:RESEARCHES]-> Topic)
+MATCH (a:Author)-[:WROTE]->(p:Paper)-[:HAS_TOPIC]->(t:Topic)
+WITH a, t, COUNT(p) AS paper_count
+MERGE (a)-[r:RESEARCHES]->(t)
+SET r.paper_count = paper_count;
+
+// 2. Create SHARED_TOPIC Relationship (Author -[:SHARED_TOPIC]-> Author)
+MATCH (a1:Author)-[:RESEARCHES]->(t:Topic)<-[:RESEARCHES]-(a2:Author)
+WHERE a1.id < a2.id
+WITH a1, a2, COUNT(t) AS shared_topics
+MERGE (a1)-[r:SHARED_TOPIC]->(a2)
+SET r.shared_topics = shared_topics;
+
+// 3. Create SHARED_JOURNAL Relationship (Author -[:SHARED_JOURNAL]-> Author)
+MATCH (a1:Author)-[:WROTE]->(p1:Paper)-[:PUBLISHED_IN]->(j:Journal)<-[:PUBLISHED_IN]-(p2:Paper)<-[:WROTE]-(a2:Author)
+WHERE a1.id <> a2.id
+WITH a1, a2, COUNT(DISTINCT j) AS shared_journals
+MERGE (a1)-[r:SHARED_JOURNAL]->(a2)
+SET r.shared_journals = shared_journals;
+
+// 4. Add Author Features (total_citations and primary_topic)
+MATCH (a:Author)-[:WROTE]->(p:Paper)
+WITH a, SUM(p.citationCount) AS total_citations
+SET a.total_citations = total_citations;
+
+MATCH (a:Author)-[r:RESEARCHES]->(t:Topic)
+WITH a, t, r.paper_count AS count
+ORDER BY count DESC
+WITH a, COLLECT(t.name)[0] AS primary_topic
+SET a.primary_topic = primary_topic;
+
+// 5. Add last_collab_year to Authors
+MATCH (a:Author)-[r:CO_AUTHORED]->()
+WITH a, MAX(r.last_collaboration_year) AS last_collab_year
+SET a.last_collab_year = last_collab_year;
