@@ -40,7 +40,6 @@ CALL gds.graph.project(
     Author: {
       label: 'Author',
       properties: {
-        domain_id: { property: 'domain_id', defaultValue: null },
         paper_count: { property: 'paper_count', defaultValue: 0 },
         citation_count: { property: 'citation_count', defaultValue: 0 }
       }
