@@ -58,10 +58,14 @@ RETURN graphName, nodeCount, relationshipCount;
 // Create the pipeline
 CALL gds.beta.pipeline.linkPrediction.create('author-lp-pipeline');
 
-// Add node embeddings using fastRP algorithm
-CALL gds.beta.pipeline.linkPrediction.addNodeProperty('author-lp-pipeline', 'fastRP', {
+// Add node embeddings using node2vec algorithm
+CALL gds.beta.pipeline.linkPrediction.addNodeProperty('author-lp-pipeline', 'node2vec', {
   mutateProperty: 'embedding',
-  embeddingDimension: 64
+  embeddingDimension: 64,
+  walkLength: 80,
+  walksPerNode: 10,
+  returnFactor: 1.0,
+  inOutFactor: 1.0
 });
 
 // Add Hadamard feature extraction on the embeddings
@@ -90,12 +94,14 @@ RETURN modelInfo.metrics;
 // Predict top N potential links
 CALL gds.beta.pipeline.linkPrediction.predict.stream('author-graph', {
   modelName: 'author-lp-model',
-  topN: 10
+  topN: 100
 })
 YIELD node1, node2, probability
-RETURN gds.util.asNode(node1).name AS Author1,
-       gds.util.asNode(node2).name AS Author2,
-       probability
+WITH gds.util.asNode(node1) AS a1,
+     gds.util.asNode(node2) AS a2,
+     probability
+WHERE id(a1) < id(a2) // Ensures unique pair
+RETURN a1.name AS Author1, a2.name AS Author2, probability
 ORDER BY probability DESC
-LIMIT 10;
+LIMIT 100;
 
