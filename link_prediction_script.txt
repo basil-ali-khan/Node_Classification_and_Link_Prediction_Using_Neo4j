@@ -1,0 +1,106 @@
+// Drop existing GDS graphs
+CALL {
+  WITH [] AS dummy
+  CALL gds.graph.list() YIELD graphName
+  CALL gds.graph.drop(graphName, false) YIELD graphName AS droppedGraph
+  RETURN count(*) AS droppedGraphs
+} RETURN 'Dropped old graphs' AS step;
+
+// Drop existing pipelines
+CALL {
+  WITH [] AS dummy
+  CALL gds.pipeline.list() YIELD pipelineName
+  CALL gds.pipeline.drop(pipelineName) YIELD pipelineName AS droppedPipeline
+  RETURN count(*) AS droppedPipelines
+} RETURN 'Dropped old pipelines' AS step;
+
+//  Drop existing trained models
+CALL {
+  WITH [] AS dummy
+  CALL gds.model.list() YIELD modelName
+  CALL gds.model.drop(modelName) YIELD modelName AS droppedModel
+  RETURN count(*) AS droppedModels
+} RETURN 'Dropped old models' AS step;
+
+// Recreate CO_AUTHORED relationships
+MATCH (:Author)-[r:CO_AUTHORED]-(:Author) DELETE r;
+MATCH (a1:Author)-[:WROTE]->(p:Paper)<-[:WROTE]-(a2:Author)
+WHERE a1.id < a2.id AND p.year IS NOT NULL
+MERGE (a1)-[r:CO_AUTHORED {collaboration_year: p.year}]-(a2);
+
+// Handle papers with no year property by using a default value
+MATCH (a1:Author)-[:WROTE]->(p:Paper)<-[:WROTE]-(a2:Author)
+WHERE a1.id < a2.id AND p.year IS NULL
+MERGE (a1)-[r:CO_AUTHORED {collaboration_year: 0}]-(a2);
+
+// Project the graph with undirected relationships and default property values
+CALL gds.graph.project(
+  'author-graph',
+  {
+    Author: {
+      label: 'Author',
+      properties: {
+        paper_count: { property: 'paper_count', defaultValue: 0 },
+        citation_count: { property: 'citation_count', defaultValue: 0 }
+      }
+    }
+  },
+  {
+    CO_AUTHORED: {
+      type: 'CO_AUTHORED',
+      orientation: 'UNDIRECTED'
+    }
+  }
+) YIELD graphName, nodeCount, relationshipCount
+RETURN graphName, nodeCount, relationshipCount;
+
+// Create the pipeline
+CALL gds.beta.pipeline.linkPrediction.create('author-lp-pipeline');
+
+// Add node embeddings using node2vec algorithm
+CALL gds.beta.pipeline.linkPrediction.addNodeProperty('author-lp-pipeline', 'node2vec', {
+  mutateProperty: 'embedding',
+  embeddingDimension: 64,
+  walkLength: 80,
+  walksPerNode: 10,
+  returnFactor: 1.0,
+  inOutFactor: 1.0
+});
+
+// Add Hadamard feature extraction on the embeddings
+CALL gds.beta.pipeline.linkPrediction.addFeature('author-lp-pipeline', 'hadamard', {
+  nodeProperties: ['embedding']
+});
+
+// Configure the train/test split
+CALL gds.beta.pipeline.linkPrediction.configureSplit('author-lp-pipeline', {
+  trainFraction: 0.8,
+  testFraction: 0.2,
+  negativeSamplingRatio: 1.0
+});
+
+// Add logistic regression as the ML model
+CALL gds.beta.pipeline.linkPrediction.addLogisticRegression('author-lp-pipeline');
+
+// Train the model
+CALL gds.beta.pipeline.linkPrediction.train('author-graph', {
+  pipeline: 'author-lp-pipeline',
+  modelName: 'author-lp-model',
+  targetRelationshipType: 'CO_AUTHORED'
+}) YIELD modelInfo
+RETURN modelInfo.metrics;
+
+// Predict top N potential links
+CALL gds.beta.pipeline.linkPrediction.predict.stream('author-graph', {
+  modelName: 'author-lp-model',
+  topN: 100
+})
+YIELD node1, node2, probability
+WITH gds.util.asNode(node1) AS a1,
+     gds.util.asNode(node2) AS a2,
+     probability
+WHERE id(a1) < id(a2) // Ensures unique pair
+RETURN a1.name AS Author1, a2.name AS Author2, probability
+ORDER BY probability DESC
+LIMIT 100;
+
