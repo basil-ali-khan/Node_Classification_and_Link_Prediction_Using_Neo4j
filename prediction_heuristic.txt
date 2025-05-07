@@ -1,0 +1,116 @@
+//  Drop existing GDS graphs
+CALL {
+  WITH [] AS dummy
+  CALL gds.graph.list() YIELD graphName
+  CALL gds.graph.drop(graphName, false) YIELD graphName AS droppedGraph
+  RETURN count(*) AS droppedGraphs
+} RETURN 'Dropped old graphs' AS step;
+
+//  Drop existing models
+CALL {
+  WITH [] AS dummy
+  CALL gds.model.list() YIELD modelName
+  CALL gds.model.drop(modelName) YIELD modelName AS droppedModel
+  RETURN count(*) AS droppedModels
+} RETURN 'Dropped old models' AS step;
+
+//  Compute author statistics for better features
+MATCH (a:Author)
+WITH a
+OPTIONAL MATCH (a)-[:WROTE]->(p:Paper)
+WITH a, count(p) AS paperCount
+OPTIONAL MATCH (a)-[:WROTE]->(p:Paper)<-[:CITES]-(citing:Paper)
+WITH a, paperCount, count(DISTINCT citing) AS citationCount
+OPTIONAL MATCH (a)-[:WROTE]->(p:Paper)-[:CITES]->(cited:Paper)
+WITH a, paperCount, citationCount, count(DISTINCT cited) AS referenceCount
+SET a.paper_count = paperCount,
+    a.citation_count = citationCount,
+    a.reference_count = referenceCount;
+
+//  Calculate collaboration metrics
+MATCH (a:Author)-[:WROTE]->(p:Paper)<-[:WROTE]-(coauthor:Author)
+WITH a, count(DISTINCT coauthor) AS coauthorCount
+SET a.coauthor_count = coauthorCount;
+
+//  Recreate enhanced CO_AUTHORED relationships
+MATCH (:Author)-[r:CO_AUTHORED]-(:Author) DELETE r;
+
+// First create the relationships with non-null required properties
+MATCH (a1:Author)-[:WROTE]->(p:Paper)<-[:WROTE]-(a2:Author)
+WHERE a1.id < a2.id // ensures undirected unique relationships
+WITH a1, a2, collect(p) AS sharedPapers
+MERGE (a1)-[r:CO_AUTHORED {
+  collaboration_count: size(sharedPapers)
+}]-(a2);
+
+// Calculate topic similarity between authors
+MATCH (a1:Author)-[:WROTE]->(p1:Paper)-[:HAS_TOPIC]->(t:Topic)<-[:HAS_TOPIC]-(p2:Paper)<-[:WROTE]-(a2:Author)
+WHERE a1.id < a2.id
+WITH a1, a2, count(DISTINCT t) AS commonTopics
+MATCH (a1)-[r:CO_AUTHORED]-(a2)
+SET r.common_topics = commonTopics;
+
+CALL gds.graph.project( 'author-graph', 'Author', { CO_AUTHORED: { type: 'CO_AUTHORED', orientation: 'UNDIRECTED', properties: { collaboration_count: { property: 'collaboration_count', defaultValue: 0 } } } }, { nodeProperties: ['paper_count', 'citation_count', 'reference_count', 'coauthor_count', 'domain_id'] } ) YIELD graphName, nodeCount, relationshipCount RETURN graphName, nodeCount, relationshipCount
+
+CALL gds.nodeSimilarity.stream('author-graph', { topK: 100, similarityCutoff: 0.1 }) YIELD node1, node2, similarity RETURN gds.util.asNode(node1).name AS Author1, gds.util.asNode(node2).name AS Author2, gds.util.asNode(node1).domain_id AS Domain1, gds.util.asNode(node2).domain_id AS Domain2, similarity AS Score ORDER BY Score DESC LIMIT 100
+
+/ Alternative approach: Use node embeddings and KNN
+// FIXED: Removed nodeProperties parameter - fastRP will use the graph topology only
+CALL gds.fastRP.stream('author-graph', {
+  embeddingDimension: 128,
+  iterationWeights: [0.8, 0.5, 0.3]
+})
+YIELD nodeId, embedding
+WITH gds.util.asNode(nodeId) AS author, embedding
+WHERE NOT (author)-[:CO_AUTHORED]->() OR author.paper_count > 5
+RETURN author.id AS authorId, author.name AS authorName, embedding;
+
+// Comprehensive approach: Use pageRank to find important authors 
+// then similarity to find potential collaborations
+CALL gds.pageRank.stream('author-graph')
+YIELD nodeId, score
+WITH gds.util.asNode(nodeId) AS author, score AS pageRankScore
+WHERE pageRankScore > 0.1
+WITH collect(author) AS influentialAuthors
+
+UNWIND influentialAuthors AS author1
+MATCH (author1)
+MATCH (author2:Author)
+WHERE author1.id < author2.id
+  AND NOT (author1)-[:CO_AUTHORED]-(author2)
+  AND author1.domain_id = author2.domain_id
+  AND author2.paper_count > 2
+
+// Calculate similarity score based on various factors
+WITH author1, author2,
+     (toFloat(author1.paper_count) / 10) * (toFloat(author2.paper_count) / 10) * 0.3 +
+     (toFloat(author1.citation_count) / 20) * (toFloat(author2.citation_count) / 20) * 0.3 +
+     CASE WHEN author1.domain_id = author2.domain_id THEN 0.4 ELSE 0 END AS similarityScore
+
+// Check for citation relationships
+OPTIONAL MATCH (author1)-[:WROTE]->(p1:Paper)-[:CITES]->(p2:Paper)<-[:WROTE]-(author2)
+WITH author1, author2, similarityScore, count(p1) AS citesCount
+
+OPTIONAL MATCH (author1)-[:WROTE]->(p1:Paper)<-[:CITES]-(p2:Paper)<-[:WROTE]-(author2)
+WITH author1, author2, similarityScore, citesCount, count(p1) AS citedByCount
+
+// Final custom similarity score
+WITH author1, author2, 
+     similarityScore + 
+     CASE WHEN citesCount > 0 THEN 0.2 ELSE 0 END + 
+     CASE WHEN citedByCount > 0 THEN 0.2 ELSE 0 END AS finalScore
+
+WHERE finalScore > 0.5
+
+RETURN 
+  author1.name AS Author1,
+  author2.name AS Author2,
+  author1.domain_id AS Domain1,
+  author2.domain_id AS Domain2,
+  author1.paper_count AS Papers1,
+  author2.paper_count AS Papers2,
+  author1.citation_count AS Citations1,
+  author2.citation_count AS Citations2,
+  finalScore AS PredictedScore
+ORDER BY PredictedScore DESC
+LIMIT 10;
