@@ -3,6 +3,7 @@
 \usepackage{amsmath}
 \usepackage{multirow}
 \usepackage{hyperref}
+\usepackage{float}
 
 \title{Graph Data Science for Author Domain Classification and Link Prediction}
 
@@ -121,7 +122,9 @@ The first step in our methodology was to project the graph as follows:
     \begin{itemize}
       \item \texttt{CO\_AUTHOR}: Represents a collaboration between two authors on a paper.
     \end{itemize}
-  \item \textbf{Label:} Authors with known research domains were tagged with the label \texttt{AuthorWithDomain} for the classification task. Authors without a known \texttt{domain\_id} were excluded from the node classification task.
+  \item \textbf{Label:} Authors with known research domains were tagged with the label \texttt{AuthorWithDomain} for
+   the classification task. Authors without a known \texttt{domain\_id} were excluded from the node classification task.
+   This left us with 12738 authors out of 38925, approximately 32.7\% of the total count.
 \end{itemize}
 
 
@@ -129,40 +132,64 @@ The first step in our methodology was to project the graph as follows:
 To predict the \texttt{domain\_id}, we used the following features in the classification model:
 
 \begin{itemize}
-  \item \textbf{Louvain Community ID:} This feature was generated using the Louvain algorithm, which detects communities within the graph based on co-authorship patterns. Authors within the same community tend to have similar research topics, which makes this feature useful for domain classification.
-  \item \textbf{Graph Embedding:} We generated graph embeddings using the Fast Random Projection (FastRP) algorithm. This technique transforms the graph structure into a vector space, capturing the local and global structure of the co-authorship network. Each author node was assigned an embedding vector representing its position within the network.
+  \item \textbf{Louvain Community ID:} This feature was generated using the Louvain algorithm, which detects communities 
+  within the graph based on co-authorship patterns. Authors within the same community tend to have similar research topics, 
+  which makes this feature useful for domain classification. This was done in the node classification pipeline using the 
+  addNodeProperty function.
+  \item \textbf{Graph Embedding:} We generated graph embeddings using the Fast Random Projection (FastRP) algorithm. 
+  This technique transforms the graph structure into a vector space, capturing the local and global structure of the 
+  co-authorship network. Each author node was assigned an embedding vector representing its position within the network.
+  These embeddings were created in the node classification pipeline using the addNodeProperty function. Models were trained
+  over two separate embeddings: 64 and 128 while keeping the no of trees in the random forest constant.
   \item \textbf{Domain ID (Target Property):} The target property for node classification was the \texttt{domain\_id}, which denotes the author's research domain. This was used to train the classification model.
 \end{itemize}
 
 These features were chosen because they provide both structural (co-authorship network) and domain-related information (community structure, embeddings) that can help in predicting the author's research domain.
 
 \subsubsection{Machine Learning Model}
-For node classification, we used the Random Forest classifier, which is robust to overfitting and effective for high-dimensional datasets like those encountered in graph-based tasks. The classifier was trained using the Neo4j Graph Data Science library, which provides built-in support for training machine learning models on graph data. The training process was configured as follows:
+For node classification, we used the Random Forest classifier, which is robust to overfitting and effective for 
+high-dimensional datasets like those encountered in graph-based tasks. The classifier was trained using the Neo4j 
+Graph Data Science library, which provides built-in support for training machine learning models on graph data. The 
+training process was configured as follows:
 
 \begin{itemize}
-  \item \textbf{Random Forest Classifier:} This ensemble method was chosen because it handles complex datasets well by combining multiple decision trees and averaging their outputs to improve accuracy and reduce overfitting.
-  \item \textbf{5-Fold Cross-Validation:} To ensure generalization and prevent overfitting, we employed 5-fold cross-validation, splitting the data into 5 subsets. The model was trained on 4 subsets and validated on the remaining 1, rotating through all subsets.
+  \item \textbf{Random Forest Classifier:} This ensemble method was chosen because it handles complex datasets well by 
+  combining multiple decision trees and averaging their outputs to improve accuracy and reduce overfitting. 25 and 40 trees
+  were used in two separate models to compare results.
+  \item \textbf{5-Fold Cross-Validation:} To ensure generalization and prevent overfitting, we employed 5-fold 
+  cross-validation, splitting the data into 5 subsets. The model was trained on 4 subsets and validated on the remaining 1, 
+  rotating through all subsets.
   \item \textbf{Evaluation Metrics:} We evaluated the model's performance using several metrics, including:
     \begin{itemize}
       \item \textbf{F1-Weighted:} A harmonic mean of precision and recall, useful for imbalanced datasets.
       \item \textbf{Accuracy:} The proportion of correctly classified instances.
-      \item \textbf{Out-of-Bag (OOB) Error:} This error metric provides an estimate of the classifier’s performance on unseen data.
+      \item \textbf{Out-of-Bag (OOB) Error:} This error metric provides an estimate of the classifier’s performance on 
+      unseen data.
     \end{itemize}
 \end{itemize}
 
-The model was trained on the graph, where the features (Louvain community ID, graph embeddings) were used to predict the \texttt{domain\_id} of each author.
+The model was trained on the graph, where the features (Louvain community ID, graph embeddings) were used to 
+predict the \texttt{domain\_id} of each author.
 
 \subsubsection{Model Training and Evaluation}
 The training process was carried out in the Neo4j Graph Data Science environment using the following steps:
 
 \begin{itemize}
-  \item \textbf{Graph Projection:} A native projection was created for the \texttt{AuthorWithDomain} label using Cypher queries, ensuring that only the relevant nodes and relationships were included in the machine learning task.
-  \item \textbf{Pipeline Construction:} The training pipeline was built using the Neo4j GDS library, including steps for feature extraction (Louvain, FastRP embedding), training the Random Forest model, and evaluating performance using cross-validation.
-  \item \textbf{Model Training:} After defining the pipeline, the Random Forest model was trained using the features and the target \texttt{domain\_id}. The model parameters were tuned for optimal performance.
-  \item \textbf{Model Evaluation:} The trained model's performance was evaluated using the metrics mentioned earlier, and the results were analyzed to identify areas of strength and potential improvement.
+  \item \textbf{Graph Projection:} A native projection was created for the \texttt{AuthorWithDomain} label using 
+  Cypher queries, ensuring that only the relevant nodes and relationships were included in the machine learning task.
+  \item \textbf{Pipeline Construction:} The training pipeline was built using the Neo4j GDS library, including steps for 
+  feature extraction (Louvain, FastRP embedding), training the Random Forest model, and evaluating performance using 
+  cross-validation.
+  \item \textbf{Model Training:} After defining the pipeline, the Random Forest model was trained using the features and 
+  the target \texttt{domain\_id}. The model parameters were tuned for optimal performance.
+  \item \textbf{Model Evaluation:} The trained model's performance was evaluated using the metrics mentioned earlier, 
+  and the results were analyzed to identify areas of strength and potential improvement.
 \end{itemize}
 
-Once the model was trained, we used it to predict the \texttt{domain\_id} of authors who were not part of the training set, storing the predictions in a new property \texttt{predicted\_domain\_id} on each node.
+Once the model was trained, we used it to predict the \texttt{domain\_id} of authors who were not part of the 
+training set. There were a total of 3 iterations. First one was used as a base model for comparison, the second one had
+a different embedding but same number of trees as the first one, while the third one had different number of trees while keeping
+the same embedding as the first one.
 
 
 \subsection{Link Prediction}
@@ -172,7 +199,7 @@ Once the model was trained, we used it to predict the \texttt{domain\_id} of aut
 
 
 \subsection{Node Classification Results}
-The node classification model was trained to predict the \texttt{domain\_id} of authors in the co-authorship graph using a Random Forest classifier. After training and cross-validation, the following evaluation metrics were obtained from the Neo4j GDS pipeline:
+The first node classification model was trained to predict the \texttt{domain\_id} of authors in the co-authorship graph using a Random Forest classifier. After training and cross-validation, the following evaluation metrics were obtained from the Neo4j GDS pipeline:
 
 \begin{itemize}
   \item \textbf{Test Accuracy:} 0.60
@@ -215,6 +242,85 @@ To further validate the model, we applied it to unseen nodes using the `predict.
 
 The high recall value indicates that the classifier successfully predicted nearly all actual instances of each domain class. However, the slightly lower precision suggests that there were some false positives, indicating the need for improved feature representation or model tuning.
 
+\subsubsection{Iteration 2 -- Embedding = 128, Number of Trees = 25}
+
+\begin{itemize}
+  \item \textbf{Test Accuracy:} 0.59
+  \item \textbf{Test F1 Score:} 0.53
+  \item \textbf{Out-of-Bag (OOB) Error:} 0.49
+\end{itemize}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{images/NC_model_training_output_2.png} 
+  \caption{Output after training pipeline with embedding = 128 and trees = 25}
+  \label{fig:classification_metrics_2}
+\end{figure}
+
+\begin{itemize}
+  \item \textbf{Accuracy:} 0.78
+  \item \textbf{Precision:} 0.78
+  \item \textbf{Recall:} 1.00
+  \item \textbf{F1 Score:} 0.88
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{images/NC_accuracy_2.png} % Replace with your image file
+    \caption{Accuracy for embedding = 128 and trees = 25}
+    \label{fig:accuracy_2}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{images/NC_precision_recall_f1score_2.png} % Replace with your image file
+    \caption{Precision Recall and F1 Score for embedding = 128 and trees = 25}
+    \label{fig:NC_Precision_Recall_2}
+\end{figure}
+
+The change in embedding does not show any significant change in the model output.\\
+
+\subsubsection{Iteration 3 -- Embedding = 64, Number of Trees = 40}
+
+\begin{itemize}
+  \item \textbf{Test Accuracy:} 0.63
+  \item \textbf{Test F1 Score:} 0.56
+  \item \textbf{Out-of-Bag (OOB) Error:} 0.44
+\end{itemize}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{images/NC_model_training_output_3.png} 
+  \caption{Output after training pipeline with embedding = 64 and trees = 40}
+  \label{fig:classification_metrics_3}
+\end{figure}
+
+\begin{itemize}
+  \item \textbf{Accuracy:} 0.79
+  \item \textbf{Precision:} 0.80
+  \item \textbf{Recall:} 1.00
+  \item \textbf{F1 Score:} 0.88
+\end{itemize}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\linewidth]{images/NC_accuracy_3.png} % Replace with your image file
+    \caption{Accuracy for embedding = 64 and trees = 40}
+    \label{fig:accuracy_3}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\linewidth]{images/NC_precision_recall_f1score_3.png} 
+    \caption{Precision Recall and F1 Score for embedding = 64 and trees = 40}
+    \label{fig:NC_Precision_Recall_3}
+\end{figure}
+
+The increase in the number of trees for the random forest model slows a slight betterment in the results of 
+accuracy and precision.
+
+
+
 
 \subsection{Link Prediction Results}
 % To be filled in by teammates working on link prediction.
@@ -226,7 +332,7 @@ The node classification task yielded promising results, demonstrating that struc
 
 \subsection{Limitations and Challenges}
 A key limitation was the quality of node embeddings. Several authors—particularly those with few or no co-authors—received zero or low-informative embedding vectors, which hindered classification accuracy. Additionally, the presence of interdisciplinary authors, who collaborate across multiple research domains, introduced ambiguity in both graph structure and labels. These factors contributed to misclassifications and highlight the need for more robust features beyond network structure.
-\\Moreover, the model training itself was an extremely time consuming task, because of which we kept the embeddingDimension and numberOfDecisionTrees value low.
+Also, the training of the model was a resource heavy task, forcing us to limit our iterations for this task to only 3
 
 \subsection{Alternative Approaches}
 Alternative graph embedding techniques, such as Node2Vec, could be explored to better capture node similarity in sparse or heterogeneous graphs. Additionally, incorporating non-structural node features—such as publication keywords, journal categories, or citation counts—could enrich the feature set and provide context where structural signals are weak. These features could be extracted using NLP techniques applied to paper titles or abstracts.
